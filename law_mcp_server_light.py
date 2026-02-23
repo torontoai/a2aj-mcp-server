@@ -25,8 +25,8 @@ SUPABASE_URL = os.environ.get(
 )
 
 SUPABASE_KEY = os.environ.get(
-    "SUPABASE_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzc4MzQsImV4cCI6MjA4MjkxMzgzNH0.VsDYjaqy-6c_1r8csGJFueaTUYqxGpNfnIf0DhOQGE0"
+    "SUPABASE_ANON_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzE4NTk4NDAsImV4cCI6MjA0NzQzNTg0MH0.dummy"
 )
 
 # =============================================================================
