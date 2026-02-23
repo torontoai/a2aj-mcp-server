@@ -1,0 +1,13 @@
+services:
+  - name: law-mcp-server
+    region: oregon
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python law_mcp_server_light.py
+    envVars:
+      - key: SUPABASE_URL
+        value: https://fxnlejuzrdeywoinctat.supabase.co
+      - key: SUPABASE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzc4MzQsImV4cCI6MjA4MjkxMzgzNH0.VsDYjaqy-6c_1r8csGJFueaTUYqxGpNfnIf0DhOQGE0
+      - key: PORT
+        value: "10000"
