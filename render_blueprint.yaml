@@ -11,3 +11,4 @@ services:
         value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzc4MzQsImV4cCI6MjA4MjkxMzgzNH0.VsDYjaqy-6c_1r8csGJFueaTUYqxGpNfnIf0DhOQGE0
       - key: PORT
         value: "10000"
+      # MCP_API_KEY intentionally omitted = open access (no auth)

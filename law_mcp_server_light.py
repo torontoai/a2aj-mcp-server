@@ -6,6 +6,7 @@ Uses httpx directly instead of supabase SDK to avoid C++ build dependencies.
 
 import os
 import json
+import logging
 from typing import Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,19 +15,26 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
 SUPABASE_URL = os.environ.get(
-    "SUPABASE_URL", 
+    "SUPABASE_URL",
     "https://fxnlejuzrdeywoinctat.supabase.co"
 )
 
-SUPABASE_KEY = os.environ.get(
-    "SUPABASE_ANON_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzE4NTk4NDAsImV4cCI6MjA0NzQzNTg0MH0.dummy"
+# Check both env var names for compatibility (render_blueprint uses SUPABASE_KEY)
+# .strip() guards against trailing whitespace from shell env injection
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_KEY", "").strip() or
+    os.environ.get("SUPABASE_ANON_KEY", "").strip() or
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4bmxlanV6cmRleXdvaW5jdGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzc4MzQsImV4cCI6MjA4MjkxMzgzNH0.VsDYjaqy-6c_1r8csGJFueaTUYqxGpNfnIf0DhOQGE0"
 )
 
 # =============================================================================
@@ -102,9 +110,10 @@ class QueryBuilder:
                 # Use direct query param: column=eq.value
                 params[col] = f"eq.{val}"
             elif op == "ilike":
-                # Use direct query param: column=ilike.*value*
-                # Format: name_en=ilike.*contract*
-                params[col] = f"ilike.*{val}*"
+                # PostgREST uses * as wildcard (not SQL %).
+                # Convert any SQL % wildcards from callers to PostgREST *
+                postgrest_val = val.replace("%", "*")
+                params[col] = f"ilike.{postgrest_val}"
         
         # Order
         if self.order_col:
@@ -523,6 +532,19 @@ TOOL_HANDLERS = {
 
 app = FastAPI(title="A2AJ Law MCP Server")
 
+# CORS middleware - allow all origins for MCP bridge access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# API key auth is optional: only enforced if MCP_API_KEY is explicitly set
+_raw_api_key = os.environ.get("MCP_API_KEY", "")
+MCP_API_KEY = _raw_api_key if _raw_api_key and _raw_api_key != "your-secret-key-change-this" else None
+
 @app.get("/")
 async def root():
     return {"name": "A2AJ Law MCP Server", "version": "1.0.0", "status": "running"}
@@ -533,44 +555,72 @@ async def list_tools():
 
 @app.post("/tools/call")
 async def call_tool(request: Request):
-    body = await request.json()
-    
+    # Optional API key check — only enforced when MCP_API_KEY env var is set
+    if MCP_API_KEY:
+        api_key = request.headers.get("X-API-Key")
+        if api_key != MCP_API_KEY:
+            logger.warning("Rejected request: invalid API key")
+            return JSONResponse(
+                status_code=401,
+                content=MCPToolResult(
+                    [{"type": "text", "text": "Invalid or missing API key"}], is_error=True
+                ).to_dict()
+            )
+
+    # Parse request body
+    try:
+        body = await request.json()
+    except Exception:
+        logger.error("Failed to parse request JSON")
+        return JSONResponse(
+            status_code=400,
+            content=MCPToolResult(
+                [{"type": "text", "text": "Invalid JSON in request body"}], is_error=True
+            ).to_dict()
+        )
+
     tool_name = body.get("name")
     arguments = body.get("arguments", {})
-    
+
     if tool_name not in TOOL_HANDLERS:
-        raise HTTPException(status_code=404, detail=f"Tool not found: {tool_name}")
-    
-    handler = TOOL_HANDLERS[tool_name]
-    result = await handler(**arguments)
-    
-    async def sse_stream():
-        yield f"data: {json.dumps(result.to_dict())}\n\n"
-    
-    return StreamingResponse(
-        sse_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
+        logger.warning(f"Tool not found: {tool_name}")
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Tool not found: {tool_name}"}
+        )
+
+    # Execute the tool handler
+    try:
+        logger.info(f"Calling tool: {tool_name} with args: {arguments}")
+        handler = TOOL_HANDLERS[tool_name]
+        result = await handler(**arguments)
+        logger.info(f"Tool {tool_name} completed successfully")
+        return JSONResponse(content=result.to_dict())
+    except Exception as e:
+        logger.exception(f"Error executing tool {tool_name}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content=MCPToolResult(
+                [{"type": "text", "text": f"Server error: {str(e)}"}], is_error=True
+            ).to_dict()
+        )
 
 # =============================================================================
 # Main
 # =============================================================================
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
     print("=" * 60)
     print("A2AJ Law Database MCP Server")
     print("Lightweight Version (httpx)")
     print("=" * 60)
     print(f"Supabase: {SUPABASE_URL}")
+    print(f"API Key auth: {'ENABLED' if MCP_API_KEY else 'DISABLED (open access)'}")
     print("\nTools available:")
     for tool in TOOLS:
         print(f"  - {tool.name}")
-    print("\nStarting server on http://localhost:8000")
+    print(f"\nStarting server on http://0.0.0.0:{port}")
     print("=" * 60)
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(app, host="0.0.0.0", port=port)
